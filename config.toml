@@ -1,0 +1,43 @@
+# VhennCoin ENET node configuration
+
+[node]
+name = "vhenncoin-enet-node"
+chain_id = 4242
+data_dir = "./data"
+
+[api]
+listen_addr = "127.0.0.1:8545"
+enable_cors = true
+
+[network]
+listen_addr = "0.0.0.0:7000"
+# Pair / boot nodes to dial on start-up, as "host:port" or "ip:port".
+# A node syncs (downloads + validates) the chain from whichever peer reports a
+# higher finalised height.
+bootnodes = []
+max_peers = 32
+# Number of blocks requested per batch while syncing.
+sync_batch_size = 32
+
+[storage]
+path = "./data/vhenncoin.redb"
+
+[consensus]
+kind = "validator-set"
+block_time_secs = 5
+# Version stamped into blocks produced under this validator set.
+validator_set_version = 1
+# Hex-encoded SEC1 public keys (compressed or uncompressed) authorised to seal
+# blocks. Blocks above genesis are rejected unless a strict two-thirds quorum
+# of this set has attested them. Leave empty to run a genesis-only node.
+validators = []
+
+[crypto]
+signature_scheme = "secp256k1"
+
+[genesis]
+# Hex-encoded SEC1 public key (compressed or uncompressed) that receives the
+# initial 80,000,000 VHN supply. Only used the first time the chain is
+# bootstrapped; after that the stored genesis block is authoritative.
+# Leave empty to fall back to the deterministic treasury recipient.
+public_key = ""

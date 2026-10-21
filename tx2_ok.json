@@ -1,0 +1,278 @@
+﻿cargo : warning: unused import: `Attestation`
+At line:2 char:235
++ ... 5929c22ed"; cargo run --example wallet -- transfer --priv $wallet2Pri ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning: unused import: `Attestation`:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ --> src\consensus\bft_pos.rs:7:24
+  |
+7 | use crate::consensus::{Attestation, ConsensusEngine, ConsensusProof, ValidatorView};
+  |                        ^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `Error`
+ --> src\consensus\bft_pos.rs:9:20
+  |
+9 | use crate::error::{Error, Result};
+  |                    ^^^^^
+
+warning: unused import: `crate::block::Transaction`
+ --> src\state.rs:8:5
+  |
+8 | use crate::block::Transaction;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: variable does not need to be mutable
+  --> src\consensus\bft_pos.rs:41:13
+   |
+41 |         let mut engine = Self::new(config.validator_set_version);
+   |             ----^^^^^^
+   |             |
+   |             help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: fields `requires_atleast_one_proposer_key` and `proposer_keys` are never read
+  --> src\consensus\bft_pos.rs:26:5
+   |
+23 | pub struct BftPosEngine {
+   |            ------------ fields in this struct
+...
+26 |     requires_atleast_one_proposer_key: bool,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+27 |     proposer_keys: Vec<Address>,
+   |     ^^^^^^^^^^^^^
+   |
+   = note: `BftPosEngine` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code 
+analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `vhenncoin_enet` (lib) generated 5 warnings (run `cargo fix --lib -p vhenncoin_enet` to apply 4 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
+     Running `target\debug\examples\wallet.exe transfer --priv 
+a072675af880d36499a9df0ca12943ccd15aedf487630c7154184ddc5e2437b3 --txid 
+44b9cb99134ffec5f62826e17b0d1c57c69f6e49803bcb385be0e6543141ab8f --index 0 --to 
+eae12f0d40120e2e09fa751393446966ef1113e6621411fb81b68be5929c22ed --amount 50000000000000`
+{
+  "version": 1,
+  "tx_type": "transfer",
+  "inputs": [
+    {
+      "previous_output": {
+        "txid": [
+          68,
+          185,
+          203,
+          153,
+          19,
+          79,
+          254,
+          197,
+          246,
+          40,
+          38,
+          225,
+          123,
+          13,
+          28,
+          87,
+          198,
+          159,
+          110,
+          73,
+          128,
+          59,
+          203,
+          56,
+          91,
+          224,
+          230,
+          84,
+          49,
+          65,
+          171,
+          143
+        ],
+        "output_index": 0
+      },
+      "signature": [
+        128,
+        220,
+        16,
+        55,
+        140,
+        61,
+        6,
+        2,
+        32,
+        87,
+        130,
+        44,
+        172,
+        99,
+        44,
+        82,
+        139,
+        45,
+        119,
+        210,
+        215,
+        148,
+        247,
+        241,
+        155,
+        241,
+        222,
+        142,
+        231,
+        43,
+        114,
+        206,
+        58,
+        55,
+        213,
+        61,
+        232,
+        190,
+        78,
+        167,
+        47,
+        222,
+        130,
+        57,
+        196,
+        150,
+        154,
+        136,
+        177,
+        65,
+        186,
+        81,
+        230,
+        183,
+        240,
+        177,
+        55,
+        52,
+        174,
+        238,
+        61,
+        31,
+        118,
+        213
+      ],
+      "public_key": [
+        2,
+        108,
+        109,
+        245,
+        245,
+        232,
+        122,
+        245,
+        17,
+        22,
+        156,
+        117,
+        73,
+        104,
+        255,
+        126,
+        94,
+        134,
+        144,
+        201,
+        160,
+        127,
+        224,
+        202,
+        21,
+        72,
+        197,
+        65,
+        5,
+        103,
+        134,
+        141,
+        212
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "asset_id": [
+        43,
+        19,
+        160,
+        69,
+        192,
+        207,
+        205,
+        78,
+        234,
+        212,
+        46,
+        252,
+        173,
+        7,
+        108,
+        50,
+        66,
+        212,
+        52,
+        84,
+        88,
+        188,
+        17,
+        191,
+        34,
+        0,
+        238,
+        69,
+        197,
+        114,
+        73,
+        212
+      ],
+      "amount": 50000000000000,
+      "recipient": [
+        234,
+        225,
+        47,
+        13,
+        64,
+        18,
+        14,
+        46,
+        9,
+        250,
+        117,
+        19,
+        147,
+        68,
+        105,
+        102,
+        239,
+        17,
+        19,
+        230,
+        98,
+        20,
+        17,
+        251,
+        129,
+        182,
+        139,
+        229,
+        146,
+        156,
+        34,
+        237
+      ]
+    }
+  ],
+  "lock_time": 0
+}
+
