@@ -6,7 +6,8 @@
 mod transaction;
 
 pub use transaction::{
-    OutPoint, RegistrationPayload, Transaction, TransactionType, TxInput, TxOutput, Txid,
+    OutPoint, RegistrationPayload, RemovalPayload, Transaction, TransactionType, TxInput, TxOutput,
+    Txid, VotePayload,
 };
 
 use serde::{Deserialize, Serialize};

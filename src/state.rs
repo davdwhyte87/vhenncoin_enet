@@ -1,12 +1,16 @@
 //! Shared application state passed to the HTTP and P2P servers.
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use tokio::sync::broadcast;
 use tokio::sync::Mutex as AsyncMutex;
 
+use crate::block::Transaction;
 use crate::config::Config;
 use crate::consensus::ConsensusEngine;
+use crate::crypto::Hash;
 use crate::storage::Storage;
 
 /// Lifecycle phase of a node with respect to the network.
@@ -95,10 +99,16 @@ pub struct AppState {
     /// This node's identity key pair, loaded from (or generated into) its
     /// keystore file. `None` when no keystore is configured.
     pub identity: Option<Arc<crate::crypto::Keypair>>,
+    /// Transactions accepted by this node, re-broadcast to every connected
+    /// peer so a governance request reaches the validators that must seal it.
+    gossip: Arc<broadcast::Sender<Transaction>>,
+    /// Transaction ids already accepted or relayed, so gossip terminates.
+    seen_transactions: Arc<Mutex<HashSet<Hash>>>,
 }
 
 impl AppState {
     pub fn new(config: Config, storage: Storage, consensus: Arc<dyn ConsensusEngine>) -> Self {
+        let (gossip, _) = broadcast::channel(256);
         Self {
             config: Arc::new(config),
             storage: Arc::new(storage),
@@ -109,7 +119,35 @@ impl AppState {
             peer_count: Arc::new(AtomicUsize::new(0)),
             mempool: Arc::new(Mempool::new()),
             identity: None,
+            gossip: Arc::new(gossip),
+            seen_transactions: Arc::new(Mutex::new(HashSet::new())),
         }
+    }
+
+    /// Subscribe to transactions accepted by this node.
+    pub fn subscribe_transactions(&self) -> broadcast::Receiver<Transaction> {
+        self.gossip.subscribe()
+    }
+
+    /// Re-broadcast a transaction to every connected peer.
+    pub fn broadcast_transaction(&self, tx: Transaction) {
+        let _ = self.gossip.send(tx);
+    }
+
+    /// Whether this transaction has already been accepted or relayed.
+    pub fn has_seen_transaction(&self, txid: &Hash) -> bool {
+        self.seen_transactions
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .contains(txid)
+    }
+
+    /// Remember a transaction id so gossip terminates.
+    pub fn mark_transaction_seen(&self, txid: Hash) {
+        self.seen_transactions
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .insert(txid);
     }
 
     /// Attach this node's identity key pair.

@@ -214,6 +214,8 @@ mod tests {
             }],
             lock_time: 0,
             registration: None,
+            vote: None,
+            removal: None,
         };
         let message = tx.signing_message(0);
         tx.inputs[0].signature = keypair.sign(&message);
@@ -454,6 +456,8 @@ mod bft_pos_tests {
             }],
             lock_time: 0,
             registration: None,
+            vote: None,
+            removal: None,
         };
         tx.inputs[0].signature = keypair.sign(&tx.signing_message(0));
 

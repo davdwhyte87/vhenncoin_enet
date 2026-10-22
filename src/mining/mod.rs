@@ -54,15 +54,25 @@ async fn produce_block(state: Arc<AppState>) -> Result<()> {
         return Ok(());
     }
 
-    let keypair = &keypairs[0];
+    let storage = &state.storage;
+    let head = storage.head_height()?;
+    let head_hash = storage.head_hash()?;
+    let height = head + 1;
+
+    // In a permissioned set only the designated proposer may seal the block.
+    let Some(expected) = state.consensus.select_proposer(&head_hash, height) else {
+        return Ok(());
+    };
+    let Some(keypair) = keypairs.iter().find(|kp| kp.address() == expected) else {
+        return Ok(());
+    };
+
+    let set_version = storage.validator_set_version()?;
+
     let pending = state.mempool.drain_transactions(1000);
     if pending.is_empty() {
         return Ok(());
     }
-
-    let storage = &state.storage;
-    let head = storage.head_height()?;
-    let head_hash = storage.head_hash()?;
 
     let mut state_final = chain::load_chain_state(storage)?;
 
@@ -71,12 +81,12 @@ async fn produce_block(state: Arc<AppState>) -> Result<()> {
         let mut test_state = state_final.clone();
         if execute_block(&mut test_state, &Block {
             header: BlockHeader {
-                height: head + 1,
+                height,
                 previous_hash: head_hash,
                 transactions_root: [0; 32],
                 state_root: [0; 32],
                 timestamp: 0,
-                validator_set_version: state.config.consensus.validator_set_version,
+                validator_set_version: set_version,
             },
             transactions: vec![tx.clone()],
             consensus_proof: ConsensusProof::default(),
@@ -85,12 +95,12 @@ async fn produce_block(state: Arc<AppState>) -> Result<()> {
         {
             if execute_block(&mut state_final, &Block {
                 header: BlockHeader {
-                    height: head + 1,
+                    height,
                     previous_hash: head_hash,
                     transactions_root: [0; 32],
                     state_root: [0; 32],
                     timestamp: 0,
-                    validator_set_version: state.config.consensus.validator_set_version,
+                    validator_set_version: set_version,
                 },
                 transactions: vec![tx.clone()],
                 consensus_proof: ConsensusProof::default(),
@@ -112,14 +122,14 @@ async fn produce_block(state: Arc<AppState>) -> Result<()> {
         .as_secs();
 
     let header = BlockHeader {
-        height: head + 1,
+        height,
         previous_hash: head_hash,
         transactions_root: crypto::merkle_root(
             &block_txs.iter().map(|t| t.txid()).collect::<Vec<_>>(),
         ),
         state_root: state_root(&state_final.utxos),
         timestamp,
-        validator_set_version: state.config.consensus.validator_set_version,
+        validator_set_version: set_version,
     };
 
     let hash = header.hash();
@@ -128,7 +138,7 @@ async fn produce_block(state: Arc<AppState>) -> Result<()> {
         round: 0,
         validator: keypair.address(),
         signature: keypair.sign(&hash),
-        bitmap: vec![0b1],
+        bitmap: Vec::new(),
         attestations: Vec::new(),
     };
 

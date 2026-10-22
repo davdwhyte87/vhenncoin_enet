@@ -10,6 +10,11 @@
 //! * [`Transaction`] groups inputs and outputs into a single transfer.
 //!
 //! There are intentionally no gas fees and no transaction fees.
+//!
+//! Besides transfers, three governance transaction kinds travel as ordinary
+//! transactions and are therefore applied deterministically by every node when
+//! their block is executed: validator registration, validator votes and
+//! override removals.
 
 use serde::{Deserialize, Serialize};
 
@@ -27,10 +32,17 @@ pub enum TransactionType {
     /// The fee-less mint transaction. Only valid as the first transaction of
     /// the genesis block.
     Coinbase,
-    /// Registers a node as a validator: binds a node identity public key to a
-    /// stake wallet that has already paid the minimum stake into the system
-    /// wallet. Moves no coins.
+    /// Requests admission to the validator set: binds a node identity public
+    /// key to a stake wallet that has already paid the minimum stake into the
+    /// system wallet. The node starts in `Pending` and only becomes a
+    /// validator once the current validators approve it. Moves no coins.
     ValidatorRegistration,
+    /// Casts an approval or rejection vote for a pending node.
+    ValidatorVote,
+    /// Removes an approved (or pending) node using one of the configured
+    /// override keys. Moves no coins itself; the refund is applied by the
+    /// chain.
+    NodeRemoval,
 }
 
 impl TransactionType {
@@ -40,6 +52,8 @@ impl TransactionType {
             TransactionType::Transfer => 0,
             TransactionType::Coinbase => 1,
             TransactionType::ValidatorRegistration => 2,
+            TransactionType::ValidatorVote => 3,
+            TransactionType::NodeRemoval => 4,
         }
     }
 }
@@ -81,6 +95,32 @@ pub struct RegistrationPayload {
     pub signature: Vec<u8>,
 }
 
+/// Payload carried by a [`TransactionType::ValidatorVote`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VotePayload {
+    /// SEC1 bytes of the voting validator's identity public key.
+    pub voter_public_key: Vec<u8>,
+    /// SEC1 bytes of the node being voted on.
+    pub target_node_public_key: Vec<u8>,
+    /// `true` approves the node, `false` rejects it.
+    pub approve: bool,
+    /// Signature by the voter's identity key over the transaction id.
+    #[serde(default)]
+    pub signature: Vec<u8>,
+}
+
+/// Payload carried by a [`TransactionType::NodeRemoval`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemovalPayload {
+    /// SEC1 bytes of the override public key authorising the removal.
+    pub override_public_key: Vec<u8>,
+    /// SEC1 bytes of the node being removed.
+    pub target_node_public_key: Vec<u8>,
+    /// Signature by the override key over the transaction id.
+    #[serde(default)]
+    pub signature: Vec<u8>,
+}
+
 /// A transfer: a set of outputs being spent and a set of outputs being created.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Transaction {
@@ -92,6 +132,12 @@ pub struct Transaction {
     /// Present only for [`TransactionType::ValidatorRegistration`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registration: Option<RegistrationPayload>,
+    /// Present only for [`TransactionType::ValidatorVote`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vote: Option<VotePayload>,
+    /// Present only for [`TransactionType::NodeRemoval`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub removal: Option<RemovalPayload>,
 }
 
 impl Transaction {
@@ -105,6 +151,22 @@ impl Transaction {
         matches!(self.tx_type, TransactionType::ValidatorRegistration)
     }
 
+    /// Whether this is a validator vote.
+    pub fn is_vote(&self) -> bool {
+        matches!(self.tx_type, TransactionType::ValidatorVote)
+    }
+
+    /// Whether this is an override removal.
+    pub fn is_removal(&self) -> bool {
+        matches!(self.tx_type, TransactionType::NodeRemoval)
+    }
+
+    /// Whether this transaction participates in governance rather than moving
+    /// coins.
+    pub fn is_governance(&self) -> bool {
+        self.is_registration() || self.is_vote() || self.is_removal()
+    }
+
     /// Total value created across all outputs.
     pub fn total_output(&self) -> u128 {
         self.outputs.iter().map(|output| output.amount).sum()
@@ -112,8 +174,8 @@ impl Transaction {
 
     /// Canonical byte encoding used for hashing and signing.
     ///
-    /// Input signatures are deliberately excluded so the transaction id cannot
-    /// be mutated by re-encoding a valid signature.
+    /// Signatures are deliberately excluded so the transaction id cannot be
+    /// mutated by re-encoding a valid signature.
     pub fn encode(&self) -> Vec<u8> {
         let mut buf = Vec::new();
 
@@ -134,12 +196,20 @@ impl Transaction {
             buf.extend_from_slice(&output.recipient);
         }
 
-        // Registration requests commit the node key and stake wallet to the
-        // txid; the signature stays outside the encoding, like input
-        // signatures. Transfer and coinbase encodings are unchanged.
+        // Governance requests commit their identifying fields to the txid; the
+        // signatures stay outside the encoding, like input signatures.
         if let Some(registration) = &self.registration {
             write_bytes(&mut buf, &registration.node_public_key);
             buf.extend_from_slice(&registration.stake_address);
+        }
+        if let Some(vote) = &self.vote {
+            write_bytes(&mut buf, &vote.voter_public_key);
+            write_bytes(&mut buf, &vote.target_node_public_key);
+            buf.push(u8::from(vote.approve));
+        }
+        if let Some(removal) = &self.removal {
+            write_bytes(&mut buf, &removal.override_public_key);
+            write_bytes(&mut buf, &removal.target_node_public_key);
         }
 
         buf.extend_from_slice(&self.lock_time.to_le_bytes());

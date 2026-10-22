@@ -75,11 +75,7 @@ async fn check_once(state: &AppState) -> Result<(), String> {
         return Err(format!("node {node_hex} already registered"));
     }
 
-    let staked = chain_state
-        .stakes
-        .get(&stake_address)
-        .copied()
-        .unwrap_or(0);
+    let staked = crate::registry::stake_total(&chain_state.stakes, &stake_address);
     if staked < MIN_STAKE {
         return Err(format!(
             "stake wallet {} has staked {} which is below the minimum {MIN_STAKE}",
@@ -100,14 +96,10 @@ async fn check_once(state: &AppState) -> Result<(), String> {
         ));
     }
 
-    // Validate locally first so a bad request never enters the mempool.
-    crate::chain::validate_transaction(&chain_state, &tx)
+    // Validate locally, enqueue and gossip it so whichever validator is due to
+    // propose the next block receives it.
+    crate::chain::accept_transaction(state, tx)
         .map_err(|err| format!("registration would be rejected: {err}"))?;
-
-    state
-        .mempool
-        .add_transaction(tx)
-        .map_err(|err| format!("failed to enqueue registration: {err}"))?;
 
     tracing::info!(
         node = %node_hex,
@@ -151,6 +143,8 @@ fn build_registration(identity: &Keypair, stake_address: [u8; 32]) -> Transactio
             stake_address,
             signature: Vec::new(),
         }),
+        vote: None,
+        removal: None,
     };
     let txid = tx.txid();
     tx.registration

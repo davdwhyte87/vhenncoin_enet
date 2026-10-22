@@ -25,12 +25,42 @@ async fn main() -> anyhow::Result<()> {
     let genesis_recipient = config
         .genesis_recipient()
         .context("invalid genesis configuration")?;
+
+    let governance = config
+        .governance
+        .to_governance()
+        .context("invalid governance configuration")?;
+
+    // The genesis validator set is the root of trust: it is the only body that
+    // can approve the first new node.
+    let mut validator_keys: Vec<k256::ecdsa::VerifyingKey> =
+        vhenncoin_enet::consensus::parse_validator_keys(&config.consensus.validators)
+            .context("invalid consensus configuration")?
+            .into_values()
+            .collect();
+    validator_keys.sort_by_key(vhenncoin_enet::crypto::address_from_public_key);
+    if validator_keys.is_empty() {
+        tracing::warn!(
+            "consensus.validators is empty: no block above genesis can be produced or verified"
+        );
+    }
+
     storage
-        .bootstrap_genesis(genesis_recipient)
+        .bootstrap_genesis(
+            genesis_recipient,
+            &governance,
+            &validator_keys,
+            config.consensus.validator_set_version,
+        )
         .context("failed to bootstrap genesis")?;
 
     let consensus = ValidatorSetEngine::from_config(&config.consensus)
         .context("invalid consensus configuration")?;
+    // Replay every persisted validator set so historical blocks can still be
+    // verified against the set that existed when they were produced.
+    consensus
+        .load_stored_sets(&storage)
+        .context("failed to load validator sets")?;
 
     // Load (or generate on first boot) this node's identity key pair.
     let identity = match load_identity(&config) {

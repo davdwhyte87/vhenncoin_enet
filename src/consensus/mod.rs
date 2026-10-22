@@ -21,7 +21,7 @@ pub use staking::{
     is_system_wallet, select_proposer, stake_deposit, system_wallet_address, StakeRegistry,
     ValidatorInfo, MIN_STAKE,
 };
-pub use validator_set::ValidatorSetEngine;
+pub use validator_set::{parse_validator_keys, quorum_size, ValidatorSet, ValidatorSetEngine};
 
 use serde::{Deserialize, Serialize};
 
@@ -88,6 +88,12 @@ pub trait ConsensusEngine: Send + Sync {
     /// Hook invoked once a block has been committed. Engines that track
     /// stake/validator membership update their state here.
     fn on_block_applied(&self, _block: &Block) {}
+
+    /// Register the validator set that takes effect from the next block on.
+    ///
+    /// Engines with a fixed set ignore this; the permissioned set engine uses
+    /// it to keep historical sets addressable by version.
+    fn register_validator_set(&self, _version: u64, _public_keys: &[Vec<u8>]) {}
 
     /// Whether any validator is currently known. Chains with no validators
     /// cannot finalise a block above genesis.

@@ -43,8 +43,19 @@ fn node_config(tag: &str, public_key_hex: &str, bootnodes: Vec<String>) -> Confi
 
 fn spawn_node(config: Config) -> AppState {
     let storage = Storage::open(&config.storage.path).unwrap();
+    let governance = config.governance.to_governance().unwrap();
+    let validators: Vec<_> =
+        vhenncoin_enet::consensus::parse_validator_keys(&config.consensus.validators)
+            .unwrap()
+            .into_values()
+            .collect();
     storage
-        .bootstrap_genesis(config.genesis_recipient().unwrap())
+        .bootstrap_genesis(
+            config.genesis_recipient().unwrap(),
+            &governance,
+            &validators,
+            config.consensus.validator_set_version,
+        )
         .unwrap();
     let engine = Arc::new(ValidatorSetEngine::from_config(&config.consensus).unwrap());
     AppState::new(config, storage, engine)
@@ -70,6 +81,8 @@ fn transfer(keypair: &Keypair, outpoint: OutPoint, amount: u128, recipient: [u8;
         }],
         lock_time: 0,
         registration: None,
+        vote: None,
+        removal: None,
     };
     let message = tx.signing_message(0);
     tx.inputs[0].signature = keypair.sign(&message);

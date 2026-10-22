@@ -150,6 +150,8 @@ fn cmd_transfer(args: &[String]) {
         }],
         lock_time: 0,
         registration: None,
+        vote: None,
+        removal: None,
     };
     // Optional change output so the remainder of the spent input returns to
     // the sender instead of being burned as an implicit fee.
@@ -205,6 +207,8 @@ fn cmd_register_node(args: &[String]) {
             stake_address,
             signature: Vec::new(),
         }),
+        vote: None,
+        removal: None,
     };
     let txid = tx.txid();
     tx.registration

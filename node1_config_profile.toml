@@ -27,6 +27,15 @@ validator_set_version = 1
 validators = ["03b485e80a6b56c1ba238d9f8907e7b300ad348ccdedbfbcef45eaae44f70a2724"]
 validator_private_keys = ["7face9f3b888f31f6bf370edcb6c00a4c4c60dabb89ee7f86e3ce5f1d8b1ba67"]
 
+# Permissioning rules. Written into genesis on first bootstrap and then read
+# only from chain state, never from this file.
+[governance]
+approval_threshold_bps = 9000
+rejection_threshold_bps = 9000
+voting_period_blocks = 0
+# Hex-encoded public keys allowed to unilaterally remove a node (any one wins).
+override_keys = []
+
 [crypto]
 signature_scheme = "secp256k1"
 

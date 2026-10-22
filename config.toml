@@ -27,10 +27,29 @@ kind = "validator-set"
 block_time_secs = 5
 # Version stamped into blocks produced under this validator set.
 validator_set_version = 1
-# Hex-encoded SEC1 public keys (compressed or uncompressed) authorised to seal
-# blocks. Blocks above genesis are rejected unless a strict two-thirds quorum
-# of this set has attested them. Leave empty to run a genesis-only node.
+# Hex-encoded public keys of the genesis validators. They are seeded as
+# approved at bootstrap and seal blocks in a deterministic round-robin: the
+# proposer for a height is `sorted_validator_addresses[height % count]`, and a
+# block is only valid if that proposer signed it. Leave empty to run a
+# genesis-only node.
 validators = []
+
+# Permissioning rules. These are consensus-critical: they are written into the
+# genesis state on first bootstrap and never re-read from this file afterwards.
+[governance]
+# Fraction of eligible validators that must approve a new node, in basis points
+# (9000 = 90%).
+approval_threshold_bps = 9000
+# Fraction that must reject a node, in basis points. A rejected node is removed
+# and its stake is paid back to the wallet that funded it.
+rejection_threshold_bps = 9000
+# Blocks a pending proposal stays open before it is auto-rejected and refunded.
+# 0 disables automatic expiry.
+voting_period_blocks = 0
+# Hex-encoded public keys allowed to unilaterally remove a node by broadcasting
+# a signed removal transaction. Any single key is sufficient. Genesis validators
+# cannot be removed this way.
+override_keys = []
 
 [crypto]
 signature_scheme = "secp256k1"

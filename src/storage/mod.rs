@@ -49,6 +49,8 @@ pub const META_HEAD_HASH: &str = "head_hash";
 pub const META_FINALIZED_HEIGHT: &str = "finalized_height";
 /// META key holding the latest finalised block hash.
 pub const META_FINALIZED_HASH: &str = "finalized_hash";
+/// META key holding the consensus-critical governance parameters.
+pub const META_GOVERNANCE: &str = "governance";
 
 /// Byte length of an [`OutPoint`] key: 32-byte txid + 4-byte little-endian index.
 pub const OUTPOINT_KEY_LEN: usize = 36;
@@ -114,8 +116,18 @@ impl Storage {
     /// bootstrapped yet. No-op on subsequent starts.
     ///
     /// Besides storing the block itself, this seeds the UTXO set with the
-    /// genesis output and marks height 0 as both the head and finalised.
-    pub fn bootstrap_genesis(&self, recipient: crate::crypto::PublicKeyHash) -> Result<bool> {
+    /// genesis output, captures the governance parameters, enrols the genesis
+    /// validators as approved registry entries and records the first validator
+    /// set. All of it happens in the same write transaction as the genesis
+    /// block, so a node can never start with a half-initialised permission
+    /// system.
+    pub fn bootstrap_genesis(
+        &self,
+        recipient: crate::crypto::PublicKeyHash,
+        governance: &crate::registry::Governance,
+        validators: &[k256::ecdsa::VerifyingKey],
+        validator_set_version: u64,
+    ) -> Result<bool> {
         let genesis = crate::genesis::genesis_block(recipient);
         let genesis_hash = genesis.hash();
 
@@ -170,6 +182,25 @@ impl Storage {
                 meta.insert(META_FINALIZED_HEIGHT, 0u64.to_le_bytes().as_slice())?;
                 meta.insert(META_FINALIZED_HASH, genesis_hash.as_slice())?;
             }
+
+            // Capture the consensus-critical governance parameters.
+            put_governance(txn, governance)?;
+
+            // Enrol the genesis validators as approved nodes so they are the
+            // root of trust for the first admission vote.
+            let mut registry = crate::registry::NodeRegistry::new();
+            crate::registry::seed_genesis_validators(&mut registry, validators, 0);
+            for (node_hex, entry) in &registry {
+                put_node_registration(txn, node_hex, entry)?;
+            }
+
+            // Record the first validator set under its version.
+            let public_keys: Vec<Vec<u8>> = validators
+                .iter()
+                .map(|key| key.to_encoded_point(true).as_bytes().to_vec())
+                .collect();
+            put_validator_set(txn, validator_set_version, &public_keys)?;
+
             Ok(true)
         })?;
 
@@ -388,8 +419,7 @@ impl Storage {
         })
     }
 
-    /// The full stake ledger: stake-wallet address -> total paid into the
-    /// system wallet.
+    /// The full stake ledger: stake-wallet address -> account.
     pub fn stake_ledger(&self) -> Result<crate::registry::StakeLedger> {
         self.read(|txn| {
             let table = txn.open_table(STAKE_LEDGER)?;
@@ -402,9 +432,49 @@ impl Storage {
         self.read(|txn| {
             let ledger = txn.open_table(STAKE_LEDGER)?;
             Ok(match ledger.get(address.as_slice())? {
-                Some(raw) => decode_u128(raw.value())?,
+                Some(raw) => {
+                    let account: crate::registry::StakeAccount = decode(raw.value())?;
+                    account.total
+                }
                 None => 0,
             })
+        })
+    }
+
+    /// The governance parameters captured at bootstrap.
+    pub fn governance(&self) -> Result<crate::registry::Governance> {
+        self.read(|txn| {
+            let meta = txn.open_table(META)?;
+            match meta.get(META_GOVERNANCE)? {
+                Some(raw) => decode(raw.value()),
+                None => Ok(crate::registry::Governance::default()),
+            }
+        })
+    }
+
+    /// Every persisted validator set, ordered by version.
+    pub fn validator_sets(&self) -> Result<Vec<(u64, Vec<Vec<u8>>)>> {
+        self.read(|txn| {
+            let table = txn.open_table(VALIDATORS)?;
+            let mut out = Vec::new();
+            for entry in table.iter()? {
+                let (version, value) = entry?;
+                out.push((version.value(), decode(value.value())?));
+            }
+            Ok(out)
+        })
+    }
+
+    /// The validator-set version currently in effect (the highest stored one).
+    pub fn validator_set_version(&self) -> Result<u64> {
+        self.read(|txn| {
+            let table = txn.open_table(VALIDATORS)?;
+            let mut latest = None;
+            for entry in table.iter()? {
+                let (version, _) = entry?;
+                latest = Some(version.value());
+            }
+            latest.ok_or_else(|| Error::NotSynced("chain has no validator set".to_string()))
         })
     }
 
@@ -429,7 +499,7 @@ pub fn load_stake_ledger(
             continue;
         }
         address.copy_from_slice(key.value());
-        ledger.insert(address, decode_u128(value.value())?);
+        ledger.insert(address, decode(value.value())?);
     }
     Ok(ledger)
 }
@@ -449,14 +519,48 @@ pub fn load_node_registry(
     Ok(registry)
 }
 
-/// Persist one stake-ledger total inside an open write transaction.
-pub fn put_stake_amount(
+/// Persist one stake account inside an open write transaction.
+pub fn put_stake_account(
     txn: &WriteTransaction,
     address: &crate::crypto::PublicKeyHash,
-    amount: u128,
+    account: &crate::registry::StakeAccount,
 ) -> Result<()> {
     let mut table = txn.open_table(STAKE_LEDGER)?;
-    table.insert(address.as_slice(), amount.to_le_bytes().as_slice())?;
+    let encoded = encode(account)?;
+    table.insert(address.as_slice(), encoded.as_slice())?;
+    Ok(())
+}
+
+/// Remove a stake account inside an open write transaction.
+pub fn remove_stake_account(
+    txn: &WriteTransaction,
+    address: &crate::crypto::PublicKeyHash,
+) -> Result<()> {
+    let mut table = txn.open_table(STAKE_LEDGER)?;
+    table.remove(address.as_slice())?;
+    Ok(())
+}
+
+/// Persist the validator set that takes effect at `version`.
+pub fn put_validator_set(
+    txn: &WriteTransaction,
+    version: u64,
+    public_keys: &[Vec<u8>],
+) -> Result<()> {
+    let mut table = txn.open_table(VALIDATORS)?;
+    let encoded = encode(&public_keys.to_vec())?;
+    table.insert(version, encoded.as_slice())?;
+    Ok(())
+}
+
+/// Persist the consensus-critical governance parameters.
+pub fn put_governance(
+    txn: &WriteTransaction,
+    governance: &crate::registry::Governance,
+) -> Result<()> {
+    let mut meta = txn.open_table(META)?;
+    let encoded = encode(governance)?;
+    meta.insert(META_GOVERNANCE, encoded.as_slice())?;
     Ok(())
 }
 
@@ -470,13 +574,6 @@ pub fn put_node_registration(
     let encoded = encode(entry)?;
     table.insert(node_public_key_hex.as_bytes(), encoded.as_slice())?;
     Ok(())
-}
-
-fn decode_u128(bytes: &[u8]) -> Result<u128> {
-    let arr: [u8; 16] = bytes
-        .try_into()
-        .map_err(|_| Error::Serialization("u128 value is not 16 bytes".to_string()))?;
-    Ok(u128::from_le_bytes(arr))
 }
 
 /// Create every table so the rest of the node can assume they exist.

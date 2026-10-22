@@ -16,6 +16,7 @@ pub struct Config {
     pub network: NetworkConfig,
     pub storage: StorageConfig,
     pub consensus: ConsensusConfig,
+    pub governance: GovernanceConfig,
     pub crypto: CryptoConfig,
     pub genesis: GenesisConfig,
 }
@@ -240,6 +241,62 @@ impl Default for CryptoConfig {
         Self {
             signature_scheme: "secp256k1".to_string(),
         }
+    }
+}
+
+/// Governance rules applied when deciding whether a node may join or leave the
+/// validator set.
+///
+/// These parameters are consensus-critical: every node must agree on them, so
+/// the values are captured into the chain state the first time the chain is
+/// bootstrapped and are read from storage afterwards.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct GovernanceConfig {
+    /// Fraction of eligible validators that must approve a node, in basis
+    /// points. `9000` = 90%.
+    pub approval_threshold_bps: u32,
+    /// Fraction of eligible validators that must reject a node, in basis
+    /// points. `9000` = 90%.
+    pub rejection_threshold_bps: u32,
+    /// Blocks a pending proposal stays open before it is rejected and its stake
+    /// refunded. `0` disables automatic expiry.
+    pub voting_period_blocks: u64,
+    /// Hex-encoded SEC1 public keys allowed to remove a node unilaterally.
+    /// Any single one of these keys is sufficient.
+    pub override_keys: Vec<String>,
+}
+
+impl Default for GovernanceConfig {
+    fn default() -> Self {
+        Self {
+            approval_threshold_bps: 9_000,
+            rejection_threshold_bps: 9_000,
+            voting_period_blocks: 0,
+            override_keys: Vec::new(),
+        }
+    }
+}
+
+impl GovernanceConfig {
+    /// Resolve the configuration into the consensus-critical form.
+    pub fn to_governance(&self) -> Result<crate::registry::Governance> {
+        if self.approval_threshold_bps == 0 || self.approval_threshold_bps > 10_000 {
+            return Err(Error::Config(
+                "governance.approval_threshold_bps must be between 1 and 10000".to_string(),
+            ));
+        }
+        if self.rejection_threshold_bps == 0 || self.rejection_threshold_bps > 10_000 {
+            return Err(Error::Config(
+                "governance.rejection_threshold_bps must be between 1 and 10000".to_string(),
+            ));
+        }
+        Ok(crate::registry::Governance {
+            approval_threshold_bps: self.approval_threshold_bps,
+            rejection_threshold_bps: self.rejection_threshold_bps,
+            voting_period_blocks: self.voting_period_blocks,
+            override_keys: crate::registry::parse_override_keys(&self.override_keys)?,
+        })
     }
 }
 

@@ -22,6 +22,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
+use crate::block::Transaction;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
@@ -149,31 +150,42 @@ where
         tracing::warn!(peer = %peer_addr, %err, "initial sync rejected a peer block");
     }
 
-    serve_peer(state, writer, rx, &mut peer).await
+    let mut gossip = state.subscribe_transactions();
+    serve_peer(state, writer, rx, &mut peer, &mut gossip).await
 }
 
-/// Steady-state: answer requests, track status, and re-sync when the peer
-/// advances past the local finalised height.
+/// Steady-state: answer requests, track status, relay gossiped transactions and
+/// re-sync when the peer advances past the local finalised height.
 async fn serve_peer<W>(
     state: &AppState,
     writer: &mut W,
     rx: &mut sync::Inbound,
     peer: &mut Peer,
+    gossip: &mut tokio::sync::broadcast::Receiver<Transaction>,
 ) -> Result<()>
 where
     W: tokio::io::AsyncWrite + Unpin,
 {
     loop {
-        match timeout(STATUS_INTERVAL, rx.recv()).await {
-            Ok(Some(Ok(message))) => handle_message(state, writer, peer, message).await?,
-            Ok(Some(Err(err))) => return Err(err),
-            Ok(None) => return Ok(()),
-            Err(_) => {
-                write_message(writer, &local_status(state)?).await?;
-                if peer.finalized_height > state.storage.head_height()? {
-                    if let Err(err) = sync::sync_from_peer(state, writer, rx, peer).await {
-                        tracing::warn!(%err, "background sync failed");
+        tokio::select! {
+            inbound = timeout(STATUS_INTERVAL, rx.recv()) => {
+                match inbound {
+                    Ok(Some(Ok(message))) => handle_message(state, writer, peer, message).await?,
+                    Ok(Some(Err(err))) => return Err(err),
+                    Ok(None) => return Ok(()),
+                    Err(_) => {
+                        write_message(writer, &local_status(state)?).await?;
+                        if peer.finalized_height > state.storage.head_height()? {
+                            if let Err(err) = sync::sync_from_peer(state, writer, rx, peer).await {
+                                tracing::warn!(%err, "background sync failed");
+                            }
+                        }
                     }
+                }
+            }
+            relayed = gossip.recv() => {
+                if let Ok(tx) = relayed {
+                    write_message(writer, &Message::NewTransaction(tx)).await?;
                 }
             }
         }
@@ -216,8 +228,16 @@ where
             let blocks = state.storage.blocks_from(from_height, clamp(max))?;
             write_message(writer, &Message::Blocks { blocks }).await?;
         }
-        // Gossip and duplicate handshakes are not handled yet.
-        Message::Hello { .. } | Message::NewTransaction(_) | Message::Pong { .. } => {}
+        Message::NewTransaction(tx) => {
+            // A governance request broadcast by a node reaches us here. Accept
+            // it (which re-validates the signature and, for a removal, checks
+            // the override key) and relay it onward.
+            if let Err(err) = crate::chain::accept_transaction(state, tx) {
+                tracing::debug!(%err, "rejected gossiped transaction");
+            }
+        }
+        // Duplicate handshakes are not handled yet.
+        Message::Hello { .. } | Message::Pong { .. } => {}
         Message::Headers { .. }
         | Message::Block(_)
         | Message::Blocks { .. }

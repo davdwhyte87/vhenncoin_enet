@@ -44,6 +44,8 @@ pub fn genesis_transaction(recipient: PublicKeyHash) -> Transaction {
         }],
         lock_time: 0,
         registration: None,
+        vote: None,
+        removal: None,
     }
 }
 

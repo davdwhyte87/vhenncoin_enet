@@ -133,32 +133,16 @@ async fn get_transaction(state: web::Data<AppState>, txid: web::Path<String>) ->
 async fn submit_transaction(state: web::Data<AppState>, body: web::Json<Transaction>) -> impl Responder {
     let tx = body.into_inner();
     let txid = tx.txid();
-    
-    // Load current chain state (UTXOs + stake ledger + registry) and validate.
-    match crate::chain::load_chain_state(&state.storage) {
-        Ok(chain_state) => {
-            match crate::chain::validate_transaction(&chain_state, &tx) {
-                Ok(()) => {
-                    let _ = state.mempool.add_transaction(tx.clone());
-                    HttpResponse::Ok().json(json!({
-                        "success": true,
-                        "txid": hex::encode(txid),
-                    }))
-                }
-                Err(err) => {
-                    HttpResponse::BadRequest().json(json!({
-                        "error": err.to_string(),
-                        "txid": hex::encode(txid),
-                    }))
-                }
-            }
-        }
-        Err(err) => {
-            HttpResponse::InternalServerError().json(json!({
-                "error": err.to_string(),
-                "txid": hex::encode(txid),
-            }))
-        }
+
+    match crate::chain::accept_transaction(&state, tx) {
+        Ok(()) => HttpResponse::Ok().json(json!({
+            "success": true,
+            "txid": hex::encode(txid),
+        })),
+        Err(err) => HttpResponse::BadRequest().json(json!({
+            "error": err.to_string(),
+            "txid": hex::encode(txid),
+        })),
     }
 }
 
@@ -166,6 +150,7 @@ async fn submit_transaction(state: web::Data<AppState>, body: web::Json<Transact
 async fn get_validators(state: web::Data<AppState>) -> impl Responder {
     match state.storage.node_registry() {
         Ok(registry) => {
+            let governance = state.storage.governance().ok();
             let validators: Vec<_> = registry
                 .values()
                 .map(|entry| {
@@ -175,11 +160,21 @@ async fn get_validators(state: web::Data<AppState>) -> impl Responder {
                         "stake_address": hex::encode(entry.stake_address),
                         "stake_amount": entry.stake_amount.to_string(),
                         "joined_height": entry.joined_height,
+                        "status": entry.status.as_str(),
+                        "genesis": entry.is_genesis(),
+                        "eligible_voters": entry.eligible_voters.len(),
+                        "approve_votes": entry.approve_votes.len(),
+                        "reject_votes": entry.reject_votes.len(),
+                        "decided_height": entry.decided_height,
                     })
                 })
                 .collect();
             HttpResponse::Ok().json(json!({
                 "count": validators.len(),
+                "active": validators.iter().filter(|v| v["status"] == "approved").count(),
+                "approval_threshold_bps": governance.as_ref().map(|g| g.approval_threshold_bps),
+                "rejection_threshold_bps": governance.as_ref().map(|g| g.rejection_threshold_bps),
+                "voting_period_blocks": governance.as_ref().map(|g| g.voting_period_blocks),
                 "validators": validators,
             }))
         }
